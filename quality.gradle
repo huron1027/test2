@@ -1,0 +1,51 @@
+apply plugin: 'checkstyle'
+apply plugin: 'jacoco'
+
+dependencies {
+    checkstyle files ("$project.rootDir/libs/checkstyle-8.44-all.jar")
+}
+
+task checkstyle(
+    type: Checkstyle,
+    group: "quality"
+){
+    configFile file("$project.rootDir/config/checkstyle/checkstyle.xml")
+    source 'src'
+    include '**/*.java'
+
+    reports {
+        xml {
+	    enabled = true
+            destination = file("build/reports/checkstyle/checkstyleReport.xml")
+        }
+        html {
+	    enabled = false
+	}
+    }
+    classpath = files()
+}
+
+test {
+    useJUnitPlatform()
+}
+
+task jacocoTestReport(
+    type: JacocoReport,
+    dependsOn: ["testDebugUnitTest", "test"],
+    group: "quality"
+) {
+    description = "Generate Jacoco coverage reports after running tests."
+    reports {
+        xml {
+            enabled = true
+            destination = file("build/reports/jacoco/jacoco.xml")
+        }
+        html {
+            enabled = false
+        }
+    }
+
+//    getSourceDirectories().from = "${projectDir}/src/main/java"
+//    getClassDirectories().from = fileTree(dir: "${buildDir}/tmp/kotlin-classes/debug")
+//    getExecutionData().from = "${buildDir}/jacoco/testDebugUnitTest.exec"
+}
