@@ -1,0 +1,309 @@
+plugins {
+    id 'org.springframework.boot' version '2.5.3' apply false
+    id 'org.dddjava.jig-gradle-plugin' apply false
+    id "org.jetbrains.kotlin.jvm" version "1.5.21" apply false
+    id 'com.gradle.plugin-publish' version '0.15.0' apply false
+    id "io.github.gradle-nexus.publish-plugin" version "1.1.0"
+}
+
+allprojects {
+    group = 'org.dddjava.jig'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            nexusUrl.set(uri("https://s01.oss.sonatype.org/service/local/"))
+            snapshotRepositoryUrl.set(uri("https://s01.oss.sonatype.org/content/repositories/snapshots/"))
+        }
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    sourceCompatibility = '1.8'
+    targetCompatibility = '1.8'
+
+    def defaultEncoding = 'UTF-8'
+
+    [AbstractCompile, Javadoc].each {
+      tasks.withType(it).each { it.options.encoding = defaultEncoding }
+    }
+
+    dependencies {
+        implementation platform('org.springframework.boot:spring-boot-dependencies:2.5.3')
+        testImplementation platform('org.junit:junit-bom:5.7.2')
+
+        testImplementation 'org.junit.jupiter:junit-jupiter-api'
+        testImplementation 'org.junit.platform:junit-platform-commons'
+        testImplementation 'org.junit.jupiter:junit-jupiter-params'
+        testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+        testImplementation 'org.assertj:assertj-core:3.20.2'
+        testImplementation 'org.mockito:mockito-core'
+
+        testImplementation('org.springframework:spring-test') {
+            exclude group: 'junit'
+        }
+    }
+
+    test {
+        useJUnitPlatform {
+            includeEngines 'junit-jupiter'
+        }
+    }
+
+    jar {
+        metaInf { from(rootDir) { include 'LICENSE' } }
+    }
+}
+
+configure([project(":jig-core")]) {
+
+    javadoc {
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
+}
+
+String findSettingValue(String envName, String propertyName) {
+    def env = System.getenv().get(envName)
+    def property = env ? env : System.properties.getProperty(propertyName)
+    property ? property : ''
+}
+
+project(':jig-core') {
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+    apply plugin: 'signing'
+    apply plugin: 'org.dddjava.jig-gradle-plugin'
+
+    ext {
+        artifactId = 'jig-core'
+    }
+
+    publishing {
+
+        publications {
+            mavenJava(MavenPublication) {
+                groupId project.group
+                artifactId project.artifactId
+                version project.version
+                from components.java
+                pom {
+                    name = "jig-core"
+                    description = "Core of JIG"
+                    url = "https://github.com/dddjava/jig"
+                    licenses {
+                        license {
+                            name = "The Apache Software License, Version 2.0"
+                            url = "http://www.apache.org/licenses/LICENSE-2.0.txt"
+                            distribution = "repo"
+                        }
+                    }
+                    developers {
+                        developer {
+                            id = "irof"
+                            name = "irof"
+                            email = "irof.ocean@gmail.com"
+                        }
+                        developer {
+                            id = "haljik"
+                            name = "haljik"
+                            email = "seiji.kawakami@sora-works.com"
+                        }
+                    }
+                    scm {
+                        connection = 'scm:git:git://github.com/dddjava/jig.git'
+                        developerConnection = 'scm:git:git://github.com/dddjava/jig.git'
+                        url = "https://github.com/dddjava/jig.git"
+                    }
+                }
+            }
+        }
+    }
+    signing {
+        def signingKeyId = findProperty("signingKeyId")
+        def signingKey = findProperty("signingKey")
+        // keyがセットされている時のみ有効（通常のビルドができなくなるため）
+        if (signingKeyId && signingKey) {
+            def signingPassword = findProperty("signingPassword")
+            useInMemoryPgpKeys(signingKeyId, signingKey, signingPassword)
+            sign publishing.publications.mavenJava
+        }
+    }
+    java {
+        withJavadocJar()
+        withSourcesJar()
+    }
+
+    dependencies {
+        api 'org.springframework:spring-context'
+        api 'org.slf4j:slf4j-api'
+        api 'ch.qos.logback:logback-classic'
+
+        // バイトコードの読み取り: infrastructure/asm
+        api 'org.ow2.asm:asm:9.2'
+        // SQLの取得: infrastructure/mybatis
+        api 'org.mybatis:mybatis:3.5.7'
+        // javadocコメントの取得: infrastructure/javaparser
+        api 'com.github.javaparser:javaparser-core:3.22.1'
+        // excel出力: presentation/poi
+        api 'org.apache.poi:poi:4.1.2'
+        api 'org.apache.poi:poi-ooxml:4.1.2'
+        // HTML出力
+        api 'org.thymeleaf:thymeleaf:3.0.12.RELEASE'
+
+        testImplementation 'org.springframework:spring-web'
+    }
+
+    build.dependsOn(publishToMavenLocal)
+
+    [compileJava, processResources]*.mustRunAfter(clean)
+    jigReports.dependsOn(clean, classes)
+}
+
+project(':jig-cli') {
+    apply plugin: 'org.springframework.boot'
+
+    dependencies {
+        implementation project(':jig-core')
+        implementation 'org.springframework.boot:spring-boot-starter'
+    }
+
+    bootJar {
+        metaInf { from(rootDir) { include 'LICENSE' } }
+        archiveName 'jig-cli.jar'
+        manifest {
+            attributes "Implementation-Version": (version ?: (LocalDate.now().format("uuuu.M.W") + "." + LocalDateTime.now().format("MMddHHmm") + ".LOCAL-SNAPSHOT" ))
+        }
+    }
+}
+
+project(':jig-cli-kt') {
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'org.jetbrains.kotlin.jvm'
+
+    dependencies {
+        implementation project(':jig-core')
+        implementation 'org.springframework.boot:spring-boot-starter'
+        // kotlinのコメント取得: infrastructure/kotlin
+        api 'org.jetbrains.kotlin:kotlin-compiler-embeddable:1.5.21'
+        api 'org.jetbrains.kotlin:kotlin-stdlib:1.5.21'
+    }
+
+    bootJar {
+        metaInf { from(rootDir) { include 'LICENSE' } }
+        archiveName 'jig-cli-kt.jar'
+        manifest {
+            attributes "Implementation-Version": (version ?: (LocalDate.now().format("uuuu.M.W") + ".LOCAL-SNAPSHOT" ))
+        }
+        requiresUnpack '**/kotlin-compiler-*.jar'
+    }
+
+    compileKotlin {
+        kotlinOptions {
+            jvmTarget = '1.8'
+        }
+    }
+
+    compileTestKotlin {
+        kotlinOptions {
+            jvmTarget = '1.8'
+        }
+    }
+}
+
+project(':jig-gradle-plugin') {
+    apply plugin: "java-gradle-plugin"
+    apply plugin: 'com.gradle.plugin-publish'
+    apply plugin: 'maven-publish'
+
+    // Write the plugin's classpath to a file to share with the tests
+    task createClasspathManifest {
+        def outputDir = file("$buildDir/$name")
+
+        inputs.files sourceSets.main.runtimeClasspath
+        outputs.dir outputDir
+
+        doLast {
+            outputDir.mkdirs()
+            file("$outputDir/plugin-classpath.txt").text = sourceSets.main.runtimeClasspath.join("\n")
+        }
+    }
+
+    dependencies {
+        implementation project(':jig-core')
+        implementation gradleApi()
+        implementation localGroovy()
+        // Add the classpath file to the test runtime classpath
+        testRuntimeOnly files(createClasspathManifest)
+    }
+
+    jar {
+        baseName = 'jig-gradle-plugin'
+    }
+
+    ext {
+        artifactId = 'jig-gradle-plugin'
+    }
+
+    gradlePlugin {
+        plugins {
+            jigGradlePlugin {
+                id = "org.dddjava.${project.artifactId}"
+                implementationClass = 'org.dddjava.jig.gradle.JigGradlePlugin'
+            }
+        }
+    }
+
+
+    pluginBundle {
+        website = 'https://github.com/dddjava/jig'
+        vcsUrl = 'https://github.com/dddjava/jig.git'
+        description = 'Visualizing code for DDD'
+        tags = ['ddd', 'visualize']
+
+        plugins {
+            jigGradlePlugin {
+                id = "org.dddjava.${project.artifactId}"
+                displayName = 'JIG Gradle Plugin'
+            }
+        }
+    }
+
+    publishing {
+        publications {
+            puluginPublication(MavenPublication) {
+                groupId project.group
+                artifactId project.artifactId
+                version project.version
+                from components.java
+            }
+        }
+    }
+
+    task setupPluginUpload doLast {
+        final def KEY_PROPERTY = "gradle.publish.key"
+        final def SECRET_PROPERTY = "gradle.publish.secret"
+
+        String key = findSettingValue('GRADLE_PUBLISH_KEY', KEY_PROPERTY)
+        String secret = findSettingValue('GRADLE_PUBLISH_SECRET', SECRET_PROPERTY)
+
+        if (key.isEmpty() || secret.isEmpty()) {
+            throw new RuntimeException("GRADLE_PUBLISH_KEY and/or GRADLE_PUBLISH_SECRET are not defined environment variables")
+        }
+
+        System.properties.setProperty(KEY_PROPERTY, key)
+        System.properties.setProperty(SECRET_PROPERTY, secret)
+    }
+
+    tasks.publishPlugins.dependsOn tasks.setupPluginUpload
+    build.dependsOn(publishToMavenLocal)
+
+    test.dependsOn(createClasspathManifest)
+
+}

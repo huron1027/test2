@@ -1,0 +1,111 @@
+version: 2.1
+
+executors:
+  circleci-openjdk-8-executor:
+    docker:
+      - image: circleci/openjdk:8u265-jdk
+    working_directory: ~/repo
+    environment:
+      _JAVA_OPTIONS: -Xmx512m
+      GRADLE_OPTS: -Dkotlin.compiler.execution.strategy="in-process"
+      TERM: dumb
+  circleci-openjdk-11-executor:
+    docker:
+      - image: circleci/openjdk:11.0.8-jdk
+    working_directory: ~/repo
+    environment:
+      _JAVA_OPTIONS: -Xmx512m
+      GRADLE_OPTS: -Dkotlin.compiler.execution.strategy="in-process"
+      TERM: dumb
+commands:
+  pre-build:
+    steps:
+      - checkout
+      - run: sudo apt-get update && sudo apt-get install -y graphviz fonts-ipafont
+      - restore_cache:
+          key: gradle-{{ checksum "build.gradle" }}
+  post-build:
+    steps:
+      - save_cache:
+          paths:
+            - ~/.gradle
+          key: gradle-{{ checksum "build.gradle" }}
+      - store_test_results:
+          path: jig-core/build/test-results
+      - store_artifacts:
+          path: jig-core/build/reports/tests
+      - store_artifacts:
+          path: jig-gradle-plugin/build/reports/tests
+  build:
+    steps:
+      - pre-build
+      - run: ./gradlew build
+      - post-build
+
+jobs:
+  build-java-8:
+    executor: circleci-openjdk-8-executor
+    steps:
+      - build
+  build-java-11:
+    executor: circleci-openjdk-11-executor
+    steps:
+      - build
+  publish:
+    executor: circleci-openjdk-8-executor
+    steps:
+      - pre-build
+      - run:
+          name: build and publish
+          command: |
+            export ORG_GRADLE_PROJECT_signingKey=$(echo $base64SigningKey | base64 -d)
+            export ORG_GRADLE_PROJECT_version=${CIRCLE_TAG}
+            ./gradlew build :jig-core:publishToSonatype :jig-gradle-plugin:publishPlugins closeAndReleaseSonatypeStagingRepository
+      - post-build
+      - store_artifacts:
+          path: jig-cli/build/libs
+          destination: module
+      - store_artifacts:
+          path: jig-cli-kt/build/libs
+          destination: module
+      - run:
+          name: Dogfooding
+          command: |
+            java -jar jig-cli/build/libs/jig-cli.jar --outputDirectory=example
+      - store_artifacts:
+          path: example
+          destination: example
+  publish-snapshot:
+    executor: circleci-openjdk-8-executor
+    steps:
+      - pre-build
+      - run:
+          name: build and publish
+          command: |
+            export ORG_GRADLE_PROJECT_signingKey=$(echo $base64SigningKey | base64 -d)
+            export ORG_GRADLE_PROJECT_version=0.0.0-SNAPSHOT
+            ./gradlew build publishToSonatype -x test
+
+workflows:
+  version: 2
+  usually:
+    jobs:
+      - build-java-8:
+          filters:
+            branches:
+              only: 'main'
+      - build-java-11:
+          requires:
+            - build-java-8
+      - publish-snapshot:
+          requires:
+            - build-java-8
+  release:
+    jobs:
+      - publish:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /.+/
+
