@@ -169,7 +169,6 @@ project(':jig-core') {
 
 project(':jig-cli') {
     apply plugin: 'org.springframework.boot'
-    apply plugin: 'jacoco'
 
     dependencies {
         implementation project(':jig-core')
@@ -224,7 +223,6 @@ project(':jig-gradle-plugin') {
     apply plugin: "java-gradle-plugin"
     apply plugin: 'com.gradle.plugin-publish'
     apply plugin: 'maven-publish'
-    apply plugin: 'jacoco'
 
     // Write the plugin's classpath to a file to share with the tests
     task createClasspathManifest {
